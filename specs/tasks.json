@@ -1,0 +1,344 @@
+{
+  "catalog": {
+    "agent_id": "Agent-001",
+    "agent_name": "Catalog Management Agent",
+    "total_tasks": 16,
+    "priority_breakdown": {
+      "high": 7,
+      "medium": 6,
+      "low": 3
+    },
+    "tasks": [
+      {
+        "id": "C-01",
+        "category": "Data Access & API Layer",
+        "name": "Product catalog read API (REST)",
+        "description": "Build REST endpoints for agent to query products by ID, SKU, category, and attribute filters. Return structured JSON with full attribute schema. Support pagination and bulk fetch.",
+        "type": "Backend",
+        "priority": "High",
+        "status": "not_started",
+        "dependencies": [],
+        "owner": null,
+        "estimated_days": 5,
+        "start_date": null,
+        "end_date": null,
+        "phase": "phase_1_foundation",
+        "endpoints": [
+          "GET /api/products/:id",
+          "GET /api/products",
+          "GET /api/products/bulk"
+        ]
+      },
+      {
+        "id": "C-02",
+        "category": "Data Access & API Layer",
+        "name": "Product catalog write API (REST)",
+        "description": "Build REST endpoints for agent to create, update, and patch product records. Support partial updates (PATCH). Validate schema on write. Emit change events to downstream systems.",
+        "type": "Backend",
+        "priority": "High",
+        "status": "not_started",
+        "dependencies": ["C-01"],
+        "owner": null,
+        "estimated_days": 7,
+        "start_date": null,
+        "end_date": null,
+        "phase": "phase_1_foundation",
+        "endpoints": [
+          "POST /api/products",
+          "PATCH /api/products/:id",
+          "PUT /api/products/:id"
+        ],
+        "events_emitted": [
+          "product.created",
+          "product.updated",
+          "product.patched"
+        ]
+      },
+      {
+        "id": "C-03",
+        "category": "Data Access & API Layer",
+        "name": "Direct DB read access layer",
+        "description": "Create read-only DB views and stored procedures for agent bulk queries — category stats, data completeness scores, missing attribute reports. Use read replica to avoid impacting production writes.",
+        "type": "Backend",
+        "priority": "High",
+        "status": "not_started",
+        "dependencies": [],
+        "owner": null,
+        "estimated_days": 5,
+        "start_date": null,
+        "end_date": null,
+        "phase": "phase_1_foundation",
+        "db_views": [
+          "v_category_stats",
+          "v_data_completeness",
+          "v_missing_attributes"
+        ]
+      },
+      {
+        "id": "C-04",
+        "category": "Agent Tools (MCP / Function Calls)",
+        "name": "Tool: classify_product",
+        "description": "Agent tool that takes product attributes + description as input and returns the correct category path (GS1 / eCl@ss / custom). Calls classification model internally. Returns confidence score and top-3 candidates.",
+        "type": "AI",
+        "priority": "High",
+        "status": "not_started",
+        "dependencies": [],
+        "owner": null,
+        "estimated_days": 7,
+        "start_date": null,
+        "end_date": null,
+        "phase": "phase_2_ai_tools",
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "product_attributes": { "type": "object" },
+            "description": { "type": "string" },
+            "image_url": { "type": "string", "required": false }
+          }
+        },
+        "output_schema": {
+          "type": "object",
+          "properties": {
+            "category_path": { "type": "string" },
+            "confidence": { "type": "number", "min": 0, "max": 1 },
+            "top_3_candidates": { "type": "array" }
+          }
+        }
+      },
+      {
+        "id": "C-05",
+        "category": "Agent Tools (MCP / Function Calls)",
+        "name": "Tool: tag_product",
+        "description": "Agent tool that analyses product image URL + description and returns suggested attribute tags. Maps to attribute schema. Returns tags with confidence scores. Supports batch mode for multiple SKUs.",
+        "type": "AI",
+        "priority": "High",
+        "status": "not_started",
+        "dependencies": [],
+        "owner": null,
+        "estimated_days": 7,
+        "start_date": null,
+        "end_date": null,
+        "phase": "phase_2_ai_tools",
+        "batch_support": true,
+        "max_batch_size": 100
+      },
+      {
+        "id": "C-06",
+        "category": "Agent Tools (MCP / Function Calls)",
+        "name": "Tool: sequence_images",
+        "description": "Agent tool that takes a product ID and list of image URLs, identifies image types (hero/lifestyle/detail), and returns the correctly ordered sequence based on category ruleset. Applies marketplace-specific rules.",
+        "type": "AI",
+        "priority": "High",
+        "status": "not_started",
+        "dependencies": [],
+        "owner": null,
+        "estimated_days": 5,
+        "start_date": null,
+        "end_date": null,
+        "phase": "phase_2_ai_tools",
+        "image_types": [
+          "hero",
+          "lifestyle",
+          "detail",
+          "swatch",
+          "packaging",
+          "manual"
+        ],
+        "marketplace_specific": true
+      },
+      {
+        "id": "C-07",
+        "category": "Agent Tools (MCP / Function Calls)",
+        "name": "Tool: check_data_quality",
+        "description": "Agent tool that scans a product record or category and returns a data completeness score, list of missing required fields, and recommended actions. Used to drive autonomous enrichment workflows.",
+        "type": "Backend",
+        "priority": "High",
+        "status": "not_started",
+        "dependencies": ["C-03"],
+        "owner": null,
+        "estimated_days": 4,
+        "start_date": null,
+        "end_date": null,
+        "phase": "phase_2_ai_tools"
+      },
+      {
+        "id": "C-08",
+        "category": "Agent Tools (MCP / Function Calls)",
+        "name": "Tool: bulk_update_products",
+        "description": "Agent tool for applying updates to multiple products simultaneously (e.g. re-classify entire category, retag a brand's products). Requires HITL approval above a configurable threshold. Returns job ID for async tracking.",
+        "type": "Backend",
+        "priority": "Medium",
+        "status": "not_started",
+        "dependencies": ["C-02"],
+        "owner": null,
+        "estimated_days": 6,
+        "start_date": null,
+        "end_date": null,
+        "phase": "phase_2_ai_tools",
+        "requires_approval": true,
+        "returns_job_id": true
+      },
+      {
+        "id": "C-09",
+        "category": "Agent Behaviour & Workflows",
+        "name": "System prompt & persona design",
+        "description": "Design the catalog agent's system prompt: role definition, task scope, tone, escalation rules, and constraints (e.g. never delete records without approval). Include few-shot examples for classification and tagging decisions.",
+        "type": "AI",
+        "priority": "High",
+        "status": "not_started",
+        "dependencies": ["C-04", "C-05", "C-06", "C-07"],
+        "owner": null,
+        "estimated_days": 3,
+        "start_date": null,
+        "end_date": null,
+        "phase": "phase_3_automation"
+      },
+      {
+        "id": "C-10",
+        "category": "Agent Behaviour & Workflows",
+        "name": "Autonomous data quality patrol workflow",
+        "description": "Build scheduled agent workflow that scans the catalog for data gaps, triggers enrichment or tagging tools, and surfaces a daily summary report. Agent runs autonomously but logs all actions for review.",
+        "type": "AI",
+        "priority": "Medium",
+        "status": "not_started",
+        "dependencies": ["C-07", "C-09"],
+        "owner": null,
+        "estimated_days": 5,
+        "start_date": null,
+        "end_date": null,
+        "phase": "phase_3_automation",
+        "scheduled": true,
+        "frequency": "daily"
+      },
+      {
+        "id": "C-11",
+        "category": "Agent Behaviour & Workflows",
+        "name": "New product onboarding workflow",
+        "description": "Agent workflow triggered on new product ingestion. Sequentially runs: classify → tag → generate description → sequence images → check quality. Outputs a ready-to-publish product record or flags for human review.",
+        "type": "AI",
+        "priority": "Medium",
+        "status": "not_started",
+        "dependencies": ["C-04", "C-05", "C-06", "C-07"],
+        "owner": null,
+        "estimated_days": 5,
+        "start_date": null,
+        "end_date": null,
+        "phase": "phase_3_automation",
+        "workflow_steps": [
+          "classify",
+          "tag",
+          "generate_description",
+          "sequence_images",
+          "check_quality"
+        ],
+        "max_timeout_seconds": 30
+      },
+      {
+        "id": "C-12",
+        "category": "Agent Behaviour & Workflows",
+        "name": "Conflict detection & resolution logic",
+        "description": "Handle cases where agent-suggested classification or tags conflict with existing human-assigned values. Define resolution policy: agent defers, flags for review, or overwrites based on confidence threshold.",
+        "type": "Backend",
+        "priority": "Medium",
+        "status": "not_started",
+        "dependencies": ["C-04", "C-05"],
+        "owner": null,
+        "estimated_days": 4,
+        "start_date": null,
+        "end_date": null,
+        "phase": "phase_3_automation",
+        "resolution_policies": [
+          "defer",
+          "flag_for_review",
+          "overwrite_if_confident"
+        ]
+      },
+      {
+        "id": "C-13",
+        "category": "UI & Monitoring",
+        "name": "Catalog agent dashboard",
+        "description": "Build UI showing agent activity: tasks completed, products processed, quality scores improved, pending approvals, and error log. Catalog managers can review and override any agent action from this view.",
+        "type": "Frontend",
+        "priority": "Medium",
+        "status": "not_started",
+        "dependencies": ["C-02"],
+        "owner": null,
+        "estimated_days": 8,
+        "start_date": null,
+        "end_date": null,
+        "phase": "phase_4_ui_monitoring",
+        "features": [
+          "real_time_activity_feed",
+          "kpi_dashboard",
+          "pending_approvals_queue",
+          "product_audit_trail",
+          "rollback_ui",
+          "error_log"
+        ]
+      },
+      {
+        "id": "C-14",
+        "category": "UI & Monitoring",
+        "name": "Agent conversational interface",
+        "description": "Chat UI allowing catalog managers to instruct the agent in natural language: 'Re-classify all products in the Outdoor category', 'Show me products with missing descriptions.' Agent interprets, plans, and executes.",
+        "type": "Frontend",
+        "priority": "Medium",
+        "status": "not_started",
+        "dependencies": ["C-09"],
+        "owner": null,
+        "estimated_days": 8,
+        "start_date": null,
+        "end_date": null,
+        "phase": "phase_4_ui_monitoring",
+        "requires_nlu": true,
+        "requires_approval_step": true
+      },
+      {
+        "id": "C-15",
+        "category": "UI & Monitoring",
+        "name": "Change history & rollback",
+        "description": "Every agent write action creates a versioned record. UI allows catalog managers to view before/after for any field and roll back agent changes at product or batch level.",
+        "type": "Backend",
+        "priority": "Low",
+        "status": "not_started",
+        "dependencies": ["C-02"],
+        "owner": null,
+        "estimated_days": 6,
+        "start_date": null,
+        "end_date": null,
+        "phase": "phase_4_ui_monitoring",
+        "versioning": true,
+        "time_travel_view": true,
+        "batch_rollback": true
+      },
+      {
+        "id": "C-16",
+        "category": "UI & Monitoring",
+        "name": "Agent performance metrics & reporting",
+        "description": "Track agent KPIs: classification accuracy rate, tagging precision, data quality score delta, average time to onboard a product. Export reports for management review.",
+        "type": "Frontend",
+        "priority": "Low",
+        "status": "not_started",
+        "dependencies": ["C-09", "C-10", "C-11"],
+        "owner": null,
+        "estimated_days": 6,
+        "start_date": null,
+        "end_date": null,
+        "phase": "phase_4_ui_monitoring",
+        "kpis": [
+          "classification_accuracy",
+          "tagging_precision",
+          "data_quality_score_delta",
+          "onboarding_time_p50",
+          "onboarding_time_p95",
+          "onboarding_time_p99"
+        ],
+        "export_formats": [
+          "pdf",
+          "csv",
+          "json"
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,489 @@
+---
+agent:
+  id: Agent-001
+  name: Catalog Management Agent
+  version: 1.0.0
+  description: |
+    Autonomously manages product records, classifications, tags, image sequencing, 
+    and data quality across the catalog. Acts on behalf of catalog managers and merchandisers.
+  
+  # Agent Persona & Constraints
+  persona:
+    role: Catalog Manager
+    tone: Professional, data-driven, clear
+    scope: Product catalog management, data quality, autonomous enrichment
+    escalation_rules:
+      - Conflicts between agent-suggested and human-assigned values require human review
+      - Bulk updates > configurable threshold require HITL (Human-In-The-Loop) approval
+      - Delete operations always require explicit approval
+      - Low confidence classifications (< 60%) are flagged for review
+  
+  # Total Scope
+  total_tasks: 16
+  priority_breakdown:
+    high: 7
+    medium: 6
+    low: 3
+
+# ============================================================================
+# TASK CATEGORIES & DEFINITIONS
+# ============================================================================
+
+tasks:
+  # --- Data Access & API Layer (3 tasks) ---
+  data_access:
+    - id: C-01
+      name: Product catalog read API (REST)
+      description: |
+        Build REST endpoints for agent to query products by ID, SKU, category, 
+        and attribute filters. Return structured JSON with full attribute schema. 
+        Support pagination and bulk fetch.
+      type: Backend
+      priority: High
+      dependencies: []
+      acceptance_criteria:
+        - GET /api/products/:id returns full product record
+        - GET /api/products?filter[category]=X supports category filtering
+        - GET /api/products?bulk=true returns paginated results
+        - Response includes attribute schema metadata
+        - Supports limit, offset, skip parameters
+      tech_stack:
+        - Language: Node.js/TypeScript
+        - Framework: Express.js or Fastify
+        - Database: PostgreSQL/MongoDB
+        - Response Format: JSON
+
+    - id: C-02
+      name: Product catalog write API (REST)
+      description: |
+        Build REST endpoints for agent to create, update, and patch product records. 
+        Support partial updates (PATCH). Validate schema on write. Emit change events 
+        to downstream systems.
+      type: Backend
+      priority: High
+      dependencies: [C-01]
+      acceptance_criteria:
+        - POST /api/products creates new product record
+        - PATCH /api/products/:id applies partial updates
+        - PUT /api/products/:id replaces entire record
+        - Schema validation on all writes
+        - Change events published to event bus (Kafka/RabbitMQ)
+        - Returns versioned record with change_id
+      tech_stack:
+        - Language: Node.js/TypeScript
+        - Event System: Kafka or RabbitMQ
+        - Validation: Joi or Zod
+        - Database: PostgreSQL/MongoDB
+
+    - id: C-03
+      name: Direct DB read access layer
+      description: |
+        Create read-only DB views and stored procedures for agent bulk queries — 
+        category stats, data completeness scores, missing attribute reports. 
+        Use read replica to avoid impacting production writes.
+      type: Backend
+      priority: High
+      dependencies: []
+      acceptance_criteria:
+        - Read replica configured in DB infrastructure
+        - Views: v_category_stats, v_data_completeness, v_missing_attributes
+        - Stored procedures for bulk quality reports
+        - Query performance < 2s for large datasets (1M+ products)
+        - Connection pooling configured
+      tech_stack:
+        - Database: PostgreSQL/MongoDB
+        - Query Language: SQL or aggregation pipeline
+        - Connection: Read Replica Pool
+
+  # --- Agent Tools / MCP Functions (6 tasks) ---
+  agent_tools:
+    - id: C-04
+      name: Tool - classify_product
+      description: |
+        Agent tool that takes product attributes + description as input and returns 
+        the correct category path (GS1 / eCl@ss / custom). Calls classification model 
+        internally. Returns confidence score and top-3 candidates.
+      type: AI
+      priority: High
+      dependencies: []
+      acceptance_criteria:
+        - Input: product attributes, description, image URL (optional)
+        - Output: {category_path, confidence, top_3_candidates}
+        - Supports GS1, eCl@ss, and custom taxonomy
+        - Confidence score >= 60%
+        - Inference time < 2s per product
+      tech_stack:
+        - AI Framework: Hugging Face Transformers or PyTorch
+        - Model: Fine-tuned classification model
+        - Language: Python microservice or Node.js wrapper
+        - Integration: MCP Protocol
+
+    - id: C-05
+      name: Tool - tag_product
+      description: |
+        Agent tool that analyses product image URL + description and returns suggested 
+        attribute tags. Maps to attribute schema. Returns tags with confidence scores. 
+        Supports batch mode for multiple SKUs.
+      type: AI
+      priority: High
+      dependencies: []
+      acceptance_criteria:
+        - Input: product description, image URLs, attribute schema
+        - Output: {tags: [{name, value, confidence}], batch_supported}
+        - Batch processing for up to 100 products
+        - Tag validation against schema
+        - Confidence thresholds configurable
+        - Response time < 5s for batch of 10 products
+      tech_stack:
+        - AI Framework: Vision models (CLIP, ViT)
+        - NLP: spaCy or Hugging Face
+        - Language: Python microservice
+        - Integration: MCP Protocol
+
+    - id: C-06
+      name: Tool - sequence_images
+      description: |
+        Agent tool that takes a product ID and list of image URLs, identifies image types 
+        (hero/lifestyle/detail), and returns the correctly ordered sequence based on 
+        category ruleset. Applies marketplace-specific rules.
+      type: AI
+      priority: High
+      dependencies: []
+      acceptance_criteria:
+        - Input: product_id, image_urls[], category, marketplace
+        - Output: {ordered_images: [{url, type, position, confidence}]}
+        - Image classification: hero, lifestyle, detail, swatch, etc.
+        - Category-specific sequencing rules
+        - Marketplace-specific behavior
+        - Inference time < 3s per product
+      tech_stack:
+        - AI Framework: Computer Vision (CNN, ResNet)
+        - Language: Python microservice
+        - Integration: MCP Protocol
+        - Config: JSON ruleset per category/marketplace
+
+    - id: C-07
+      name: Tool - check_data_quality
+      description: |
+        Agent tool that scans a product record or category and returns a data completeness 
+        score, list of missing required fields, and recommended actions. Used to drive 
+        autonomous enrichment workflows.
+      type: Backend
+      priority: High
+      dependencies: [C-03]
+      acceptance_criteria:
+        - Input: product_id or category
+        - Output: {completeness_score (0-100), missing_fields[], recommended_actions[]}
+        - Configurable field requirements per category
+        - Weights missing required vs optional fields
+        - Returns prioritized action list
+        - Query time < 500ms
+      tech_stack:
+        - Language: Node.js/TypeScript
+        - Database: PostgreSQL/MongoDB
+        - Integration: MCP Protocol
+
+    - id: C-08
+      name: Tool - bulk_update_products
+      description: |
+        Agent tool for applying updates to multiple products simultaneously 
+        (e.g. re-classify entire category, retag a brand's products). Requires HITL 
+        approval above a configurable threshold. Returns job ID for async tracking.
+      type: Backend
+      priority: Medium
+      dependencies: [C-02]
+      acceptance_criteria:
+        - Input: [{product_id, updates}], approval_threshold
+        - Output: {job_id, estimated_time, status_url}
+        - Configurable approval threshold (% of products or count)
+        - Async batch processing with job tracking
+        - Rollback capability
+        - Change audit log for all updates
+      tech_stack:
+        - Language: Node.js/TypeScript
+        - Queue: Bull or RabbitMQ for background jobs
+        - Database: PostgreSQL/MongoDB
+
+  # --- Agent Behavior & Workflows (4 tasks) ---
+  agent_workflows:
+    - id: C-09
+      name: System prompt & persona design
+      description: |
+        Design the catalog agent's system prompt: role definition, task scope, tone, 
+        escalation rules, and constraints (e.g. never delete records without approval). 
+        Include few-shot examples for classification and tagging decisions.
+      type: AI
+      priority: High
+      dependencies: [C-04, C-05, C-06, C-07]
+      acceptance_criteria:
+        - Comprehensive system prompt with role, scope, constraints
+        - Few-shot examples for classification (5-10 examples)
+        - Few-shot examples for tagging (5-10 examples)
+        - Escalation decision tree
+        - Tone guidelines and communication style
+        - Prompt versioned and testable
+      deliverables:
+        - system_prompt.md
+        - few_shot_classification.json
+        - few_shot_tagging.json
+        - escalation_logic.md
+
+    - id: C-10
+      name: Autonomous data quality patrol workflow
+      description: |
+        Build scheduled agent workflow that scans the catalog for data gaps, 
+        triggers enrichment or tagging tools, and surfaces a daily summary report. 
+        Agent runs autonomously but logs all actions for review.
+      type: AI
+      priority: Medium
+      dependencies: [C-07, C-09]
+      acceptance_criteria:
+        - Scheduled daily scan of catalog (trigger time configurable)
+        - Runs check_data_quality on each product or category sample
+        - Auto-triggers enrichment if gap detected
+        - Generates daily summary report
+        - Email/Slack notification to catalog managers
+        - Full audit log of all autonomous actions
+        - 0 false positives SLA (human review required)
+      tech_stack:
+        - Scheduler: node-cron or AWS EventBridge
+        - Database: PostgreSQL/MongoDB
+        - Notifications: SendGrid, Slack API
+        - Logging: Winston or Pino
+
+    - id: C-11
+      name: New product onboarding workflow
+      description: |
+        Agent workflow triggered on new product ingestion. Sequentially runs: 
+        classify → tag → generate description → sequence images → check quality. 
+        Outputs a ready-to-publish product record or flags for human review.
+      type: AI
+      priority: Medium
+      dependencies: [C-04, C-05, C-06, C-07]
+      acceptance_criteria:
+        - Event-driven trigger on product.created
+        - Sequential workflow execution
+        - Timeout handling (max 30s per product)
+        - Quality gate: flag for review if completeness < 80%
+        - Outputs: ready_to_publish bool, review_reason (if flagged), versioned_record
+        - Supports batch mode for multiple new products
+        - Audit trail for all workflow steps
+      tech_stack:
+        - Workflow Engine: Bull, Temporal, or AWS Step Functions
+        - Event Bus: Kafka or RabbitMQ
+        - Database: PostgreSQL/MongoDB
+
+    - id: C-12
+      name: Conflict detection & resolution logic
+      description: |
+        Handle cases where agent-suggested classification or tags conflict with 
+        existing human-assigned values. Define resolution policy: agent defers, 
+        flags for review, or overwrites based on confidence threshold.
+      type: Backend
+      priority: Medium
+      dependencies: [C-04, C-05]
+      acceptance_criteria:
+        - Conflict detection logic implemented
+        - Resolution policies: defer, flag_for_review, overwrite_if_confident
+        - Confidence thresholds configurable per policy
+        - Audit trail: before/after values, confidence, resolver (agent/human)
+        - Dashboard view of all conflicts
+        - Historical tracking for conflict patterns
+      tech_stack:
+        - Language: Node.js/TypeScript
+        - Database: PostgreSQL/MongoDB
+
+  # --- UI & Monitoring (3 tasks) ---
+  ui_monitoring:
+    - id: C-13
+      name: Catalog agent dashboard
+      description: |
+        Build UI showing agent activity: tasks completed, products processed, 
+        quality scores improved, pending approvals, and error log. Catalog managers 
+        can review and override any agent action from this view.
+      type: Frontend
+      priority: Medium
+      dependencies: [C-02, C-13]
+      acceptance_criteria:
+        - Real-time activity feed (last 24h, 7d, 30d)
+        - KPI cards: products processed, quality improved, errors
+        - Pending approvals queue with actions
+        - Product-level audit trail (before/after views)
+        - Rollback UI per product or batch
+        - Error log with resolution status
+        - Search and filter by product, category, agent action type
+      tech_stack:
+        - Framework: React or Vue.js
+        - Charting: Chart.js or D3.js
+        - State Management: Redux or Pinia
+        - UI Library: Material-UI or Tailwind CSS
+
+    - id: C-14
+      name: Agent conversational interface
+      description: |
+        Chat UI allowing catalog managers to instruct the agent in natural language: 
+        "Re-classify all products in the Outdoor category", "Show me products with 
+        missing descriptions." Agent interprets, plans, and executes.
+      type: Frontend
+      priority: Medium
+      dependencies: [C-09]
+      acceptance_criteria:
+        - Chat interface with input/output history
+        - NLU for intent parsing (catalog operations, queries, instructions)
+        - Agent shows step-by-step execution plan before running
+        - Confirmation step for destructive operations
+        - Real-time progress updates
+        - Fallback to human if confidence < threshold
+        - Chat history searchable and exportable
+      tech_stack:
+        - Framework: React or Vue.js
+        - NLU: LangChain or Hugging Face
+        - WebSocket: Socket.io for real-time updates
+        - Storage: PostgreSQL for chat history
+
+    - id: C-15
+      name: Change history & rollback
+      description: |
+        Every agent write action creates a versioned record. UI allows catalog managers 
+        to view before/after for any field and roll back agent changes at product or 
+        batch level.
+      type: Backend
+      priority: Low
+      dependencies: [C-02]
+      acceptance_criteria:
+        - Versioning on all product writes with timestamp and change_id
+        - Changeset storage: {product_id, field, old_value, new_value, actor (agent/user), timestamp}
+        - Rollback API: one-click restore to previous version
+        - Batch rollback: revert all changes made by agent in a time window
+        - Audit trail: shows all versions for a product
+        - Time-travel view: see product state at any point
+      tech_stack:
+        - Database: PostgreSQL with versioning extension (temporal tables)
+        - Language: Node.js/TypeScript
+        - Frontend: React table view
+
+    - id: C-16
+      name: Agent performance metrics & reporting
+      description: |
+        Track agent KPIs: classification accuracy rate, tagging precision, 
+        data quality score delta, average time to onboard a product. Export 
+        reports for management review.
+      type: Frontend
+      priority: Low
+      dependencies: [C-09, C-10, C-11]
+      acceptance_criteria:
+        - KPI tracking: accuracy, precision, F1, recall
+        - Quality delta tracking: before/after data completeness per category
+        - Onboarding time metrics: P50, P95, P99 latency
+        - Monthly/quarterly reports exportable as PDF
+        - Cohort comparison: agent performance by category, marketplace, time period
+        - Trend analysis: charts showing KPI improvement over time
+        - Export formats: PDF, CSV, JSON
+      tech_stack:
+        - Framework: React or Vue.js
+        - Analytics: Metabase or custom visualization
+        - Reporting: ReportLab (Python) or pdfkit (Node.js)
+
+# ============================================================================
+# DEPENDENCIES & EXECUTION ORDER
+# ============================================================================
+
+execution_phases:
+  phase_1_foundation:
+    name: API & Database Layer
+    tasks: [C-01, C-02, C-03]
+    duration_weeks: 3
+    description: Establish core data infrastructure for agent read/write operations
+
+  phase_2_ai_tools:
+    name: AI Tools & Models
+    tasks: [C-04, C-05, C-06, C-07]
+    duration_weeks: 4
+    dependencies: [phase_1_foundation]
+    description: Implement classification, tagging, sequencing, and quality check tools
+
+  phase_3_automation:
+    name: Agent Workflows & Automation
+    tasks: [C-08, C-09, C-10, C-11, C-12]
+    duration_weeks: 3
+    dependencies: [phase_2_ai_tools]
+    description: Build agent system prompt, workflows, and autonomous behaviors
+
+  phase_4_ui_monitoring:
+    name: UI, Dashboards & Reporting
+    tasks: [C-13, C-14, C-15, C-16]
+    duration_weeks: 3
+    dependencies: [phase_3_automation]
+    description: Build manager interfaces, monitoring, and performance tracking
+
+# ============================================================================
+# CONSTRAINTS & MITIGATION
+# ============================================================================
+
+constraints:
+  performance:
+    - API response time: < 500ms for single product
+    - Classification inference: < 2s
+    - Tagging inference: < 5s for batch of 10
+    - Image sequencing: < 3s
+    - Daily quality patrol: complete within 2-hour window
+
+  scalability:
+    - Support up to 10M product records
+    - Handle 1000s of concurrent API requests
+    - Batch processing: 10K+ products per job
+    - Read replica for large queries
+
+  data_quality:
+    - 99% accuracy required for classifications with confidence > 80%
+    - 0% false positive rate on data quality alerts
+    - All agent actions auditable and reversible
+
+  compliance:
+    - GDPR-compliant data handling
+    - Change audit trail (immutable log)
+    - Approval workflow for bulk operations
+    - No automatic deletion without explicit approval
+
+# ============================================================================
+# SUCCESS METRICS
+# ============================================================================
+
+success_metrics:
+  - Classification accuracy rate: > 95% for high-confidence classifications
+  - Data quality improvement: +30% completeness delta on onboarded products
+  - Agent autonomy rate: 80% of onboarding workflows complete without human review
+  - Catalog managers time saved: 70% reduction in manual tagging/classification
+  - Daily quality scan: 100% coverage with 0 missed gaps
+  - Rollback rate: < 5% of agent changes rolled back (< 20% acceptable)
+
+tech_stack_summary:
+  backend:
+    - Runtime: Node.js 18+
+    - Language: TypeScript
+    - API Framework: Express.js or Fastify
+    - Database: PostgreSQL 14+ with temporal tables
+    - Message Queue: RabbitMQ or Kafka
+    - Job Queue: Bull or Temporal
+    - ORM: TypeORM or Prisma
+
+  ai_services:
+    - Classification: PyTorch + Hugging Face
+    - Tagging: CLIP + spaCy
+    - Image Sequencing: ResNet + Computer Vision
+    - Orchestration: LangChain or Semantic Kernel
+    - MCP: Model Context Protocol integration
+
+  frontend:
+    - Framework: React 18 or Vue 3
+    - State: Redux or Pinia
+    - UI: Tailwind CSS or Material-UI
+    - Charts: Chart.js or Recharts
+    - Real-time: Socket.io
+
+  infrastructure:
+    - Container: Docker
+    - Orchestration: Kubernetes or Docker Compose
+    - Logs: ELK Stack or CloudWatch
+    - Monitoring: Prometheus + Grafana
+    - CI/CD: GitHub Actions or GitLab CI
