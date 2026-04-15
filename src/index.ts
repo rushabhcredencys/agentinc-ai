@@ -10,6 +10,7 @@ if (!globalThis.fetch) {
 import express, { Express } from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
+import path from 'path';
 import config from './config/env';
 import logger from './utils/logger';
 import { errorHandler } from './middleware/errorHandler';
@@ -33,7 +34,7 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // Static Files
-app.use(express.static('public'));
+app.use(express.static(path.join(__dirname, '../public')));
 
 // Logging middleware
 app.use((req, express, next) => {
@@ -94,15 +95,14 @@ app.use(errorHandler);
 // SERVER STARTUP
 // ============================================================================
 
-const PORT = config.app.port;
-
-app.listen(PORT, () => {
-  logger.info(
-    `🚀 Catalog Management Agent Server running on http://localhost:${PORT}`,
-  );
-  logger.info(`📚 Open browser to see available endpoints`);
-  logger.info(`📖 Specification: config/agent.yaml`);
-  logger.info(`🔧 Environment: ${config.app.nodeEnv}`);
-});
+if (!process.env.VERCEL) {
+  const PORT = config.app.port;
+  app.listen(PORT, () => {
+    logger.info(`🚀 Catalog Management Agent Server running on http://localhost:${PORT}`);
+    logger.info(`📚 Open browser to see available endpoints`);
+    logger.info(`📖 Specification: config/agent.yaml`);
+    logger.info(`🔧 Environment: ${config.app.nodeEnv}`);
+  });
+}
 
 export default app;
